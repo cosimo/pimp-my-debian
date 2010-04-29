@@ -1,0 +1,172 @@
+#!/usr/bin/env perl
+#
+# Awesome Debian Annoyment Reliever
+# Retries a command until all the perl dependencies are met.
+#
+# Usage:
+#
+# ./pimp-my-debian --command 'perl myscript'
+#
+# If the output of such a command is something like:
+#
+#   Can't locate Foo/Bar.pm in @INC...
+#
+# or:
+#
+#   Base class package "Foo::Bar" is empty...
+#
+# Then this script is what you need.
+# It will try to autodetect dependencies and annoy the debian
+# packaging system to death until:
+#
+# 1) your command succeeds
+#
+# or:
+#
+# 2) there's no available dependency to be installed
+#
+
+use strict;
+use warnings;
+use Getopt::Long;
+
+GetOptions(
+    'command:s'   => \my $command,
+    'max-tries:i' => \(my $max_tries = 9999),
+);
+
+sub run_command {
+    my ($cmd) = @_;
+    my $output = `$cmd 2>&1`;
+    return wantarray
+        ? split(/\r?\n/, $output)
+        : $output;
+}
+
+sub install_package {
+    my ($package) = @_;
+    my $use_sudo = $< | $>;
+    my $status;
+
+    for ($package) {
+        my $cmd = qq(apt-get install $_ 2>/dev/null);
+        if ($use_sudo) {
+            $cmd = "sudo $cmd";
+        }
+        $status = system($cmd);
+    }
+    $status >>= 8;
+    return ($status == 0 ? 1 : 0);
+}
+
+sub detect_dependencies {
+    my ($output) = @_;
+    my $needed_module;
+    my $needed_package;
+
+    if (! $output) {
+        return;
+    }
+
+    if ($output =~ m{Can't locate (.+?) in \@INC}mgs) {
+        $needed_module = $1;
+    }
+    elsif ($output =~ m{Base class package "(.+?)" is empty}m) {
+        $needed_package = $1;
+    }
+
+    # Are we fine already? No dependencies
+    if (not $needed_package and not $needed_module) {
+        return;
+    }
+
+    if ($needed_module) {
+        $needed_package = module_to_package($needed_module);
+    }
+
+    my $deb_name = package_to_debname($needed_package);
+
+    return $deb_name;
+}
+
+sub package_to_debname {
+    my ($package) = @_;
+
+    my $debname = lc $package;
+    $debname =~ s{::}{-}g;
+    $debname = 'lib' . $debname . '-perl';
+
+    return $debname;
+} 
+
+sub module_to_package {
+    my ($module) = @_;
+
+    my $package = $module;
+
+    $package =~ s{/}{::}g;
+    $package =~ s{\.pm$}{};
+
+    print 'Module:', $module, ' Package:', $package, "\n";
+
+    return $package;
+}
+
+sub higher_level_package {
+    my ($debname) = @_;
+    my $new_deb;
+
+    if ($debname =~ m{^lib (.+?) -perl$}mx) {
+        $new_deb = $1;
+    }
+
+    my @namespace = split '-', $new_deb;
+    pop @namespace;
+
+    $new_deb = 'lib' . join('-', @namespace) . '-perl';
+
+    return $new_deb;
+}
+
+
+if (length($0) > 10 && $command =~ $0) {
+    print "You're so awesome. Thanks for this one.\n";
+    exit 0;
+}
+
+my $try = 1;
+my $deps_failed = 0;
+
+my %known_exceptions = (
+);
+
+while ( ($try++ < $max_tries) && (! $deps_failed)) {
+    my $output = run_command($command);
+    my $deb_name = detect_dependencies($output);
+    # No more dependencies? We're done!
+    if (! $deb_name) {
+        print "No dependencies detected. We're done?\n";
+        last;
+    }
+
+    print 'Detected dependency: ', $deb_name, "\n";
+    $deps_failed = install_package($deb_name) ? 0 : 1;
+
+    # Try falling back to higher level packages
+    # (libhtml-entities-numbered-perl -> libhtml-entities-perl)
+    if ($deps_failed) {
+        $deps_failed = install_package(higher_level_package($deb_name)) ? 0 : 1;
+        if ($deps_failed) {
+            die "Can't find package for $deb_name\n";
+        }
+    }
+
+    # Still failed deps? Check if it's a known exception
+    if ($deps_failed and exists $known_exceptions{$deb_name}) {
+        $deps_failed = install_package($known_exceptions{$deb_name}) ? 0 : 1;
+    }
+
+}
+
+exit $deps_failed;
+

@@ -1,0 +1,32 @@
+Pimp my Debian
+==============
+
+Awesome Debian annoyment reliever.
+Retries a command until all the perl dependencies are met.
+
+Usage:
+
+  ./pimp-my-debian --command 'perl myscript'
+
+If the output of such a command is something like:
+
+  Can't locate Foo/Bar.pm in @INC...
+
+or:
+
+  Base class package "Foo::Bar" is empty...
+
+Then this script is what you need.
+It will try to autodetect dependencies and annoy the debian
+packaging system to death until:
+
+1) your command succeeds
+
+or:
+
+2) there's no available dependency to be installed
+
+Lots of cool ideas could be added to this little beast.
+
+cosimo@cpan.org, 29/04/2010
+
