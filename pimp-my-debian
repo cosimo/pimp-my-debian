@@ -128,6 +128,10 @@ sub higher_level_package {
     return $new_deb;
 }
 
+if (! $command) {
+    print "Usage: $0 --command '<command_to_run>'\n";
+    exit 1;
+}
 
 if (length($0) > 10 && $command =~ $0) {
     print "You're so awesome. Thanks for this one.\n";
